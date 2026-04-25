@@ -388,6 +388,24 @@ MiniResult ProjectStore::set_image_mask_path(uint64_t image_id, const std::strin
     return save(out_error);
 }
 
+MiniResult ProjectStore::set_image_processed_path(uint64_t image_id, const std::string& processed_path, std::string* out_error) {
+    if (image_id == 0 || processed_path.empty() || out_error == nullptr) {
+        return {MINI_ERROR_INVALID_ARGUMENT};
+    }
+
+    auto it = std::find_if(metadata_.capture_set.begin(), metadata_.capture_set.end(), [image_id](const ProjectMetadata::CaptureImage& image) {
+        return image.image_id == image_id;
+    });
+    if (it == metadata_.capture_set.end()) {
+        *out_error = "image id not found";
+        return {MINI_ERROR_INVALID_ARGUMENT};
+    }
+
+    it->processed_image_path = processed_path;
+    metadata_.updated_at = utc_now_iso8601();
+    return save(out_error);
+}
+
 std::string utc_now_iso8601() {
     auto now = std::chrono::system_clock::now();
     std::time_t tt = std::chrono::system_clock::to_time_t(now);

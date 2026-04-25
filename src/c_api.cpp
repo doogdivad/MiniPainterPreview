@@ -1,7 +1,9 @@
 #include "mini_painter/mini_painter.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -249,6 +251,16 @@ MiniResult resolve_image_and_mask_paths(MiniProjectHandle project, MiniImageId i
     }
     return success();
 }
+
+MiniResult resolve_processed_frame_path(MiniProjectHandle project, MiniImageId image_id, std::filesystem::path* out_processed_path) {
+    if (project == nullptr || image_id == 0 || out_processed_path == nullptr) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "invalid arguments resolving processed frame path");
+    }
+    std::ostringstream filename;
+    filename << "frame_" << std::setfill('0') << std::setw(3) << image_id << ".png";
+    *out_processed_path = std::filesystem::path(project->store->project_dir()) / "processed" / filename.str();
+    return success();
+}
 }  // namespace
 #endif
 
@@ -393,8 +405,93 @@ MiniResult mini_cleanup_mask(MiniProjectHandle project, MiniImageId image_id, Mi
 #endif
 }
 
-MiniResult mini_generate_processed_frame(MiniProjectHandle, MiniImageId, MiniFrameOptions) {
-    return not_implemented("mini_generate_processed_frame");
+MiniResult mini_generate_processed_frame(MiniProjectHandle project, MiniImageId image_id, MiniFrameOptions options) {
+#if !defined(MINI_PAINTER_HAS_OPENCV)
+    (void) project;
+    (void) image_id;
+    (void) options;
+    return not_implemented("mini_generate_processed_frame (OpenCV not available)");
+#else
+    if (project == nullptr || image_id == 0) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "mini_generate_processed_frame received invalid argument");
+    }
+
+    std::filesystem::path image_path;
+    std::filesystem::path output_mask_path;
+    MiniResult resolve_result = resolve_image_and_mask_paths(project, image_id, &image_path, &output_mask_path);
+    if (resolve_result.code != MINI_OK) {
+        return resolve_result;
+    }
+
+    cv::Mat source_image = cv::imread(image_path.string(), cv::IMREAD_COLOR);
+    if (source_image.empty()) {
+        return fail(MINI_ERROR_IMAGE_DECODE, "failed to decode source image");
+    }
+
+    cv::Mat mask = cv::imread(output_mask_path.string(), cv::IMREAD_GRAYSCALE);
+    if (mask.empty()) {
+        std::string fallback_error;
+        MiniResult fallback_result = generate_fallback_mask(source_image, &mask, &fallback_error);
+        if (fallback_result.code != MINI_OK) {
+            return fail(fallback_result.code, fallback_error.empty() ? "fallback mask generation failed" : fallback_error);
+        }
+    }
+    if (mask.size() != source_image.size()) {
+        cv::resize(mask, mask, source_image.size(), 0, 0, cv::INTER_NEAREST);
+    }
+    cv::threshold(mask, mask, 0, 255, cv::THRESH_BINARY);
+
+    std::vector<cv::Point> foreground_points;
+    cv::findNonZero(mask, foreground_points);
+    if (foreground_points.empty()) {
+        return fail(MINI_ERROR_PROCESSING, "mask contains no foreground pixels");
+    }
+
+    const cv::Rect subject_bounds = cv::boundingRect(foreground_points);
+    cv::Mat cropped_bgr = source_image(subject_bounds).clone();
+    cv::Mat cropped_alpha = mask(subject_bounds).clone();
+
+    int output_width = subject_bounds.width;
+    int output_height = subject_bounds.height;
+    if (options.normalize_canvas > 0) {
+        const int side = std::max(subject_bounds.width, subject_bounds.height);
+        output_width = side;
+        output_height = side;
+    }
+
+    cv::Mat output_rgba(output_height, output_width, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+    const int x_offset = (output_width - cropped_bgr.cols) / 2;
+    const int y_offset = (output_height - cropped_bgr.rows) / 2;
+    const cv::Rect output_roi(x_offset, y_offset, cropped_bgr.cols, cropped_bgr.rows);
+
+    cv::Mat output_roi_rgba = output_rgba(output_roi);
+    cv::Mat cropped_rgba;
+    cv::cvtColor(cropped_bgr, cropped_rgba, cv::COLOR_BGR2BGRA);
+    std::vector<cv::Mat> channels;
+    cv::split(cropped_rgba, channels);
+    channels[3] = cropped_alpha;
+    cv::merge(channels, cropped_rgba);
+    cropped_rgba.copyTo(output_roi_rgba);
+
+    std::filesystem::path output_frame_path;
+    MiniResult processed_path_result = resolve_processed_frame_path(project, image_id, &output_frame_path);
+    if (processed_path_result.code != MINI_OK) {
+        return processed_path_result;
+    }
+
+    if (!cv::imwrite(output_frame_path.string(), output_rgba)) {
+        return fail(MINI_ERROR_IO, "failed to write processed frame png");
+    }
+
+    std::string persist_error;
+    const std::filesystem::path rel_frame = std::filesystem::path("processed") / output_frame_path.filename();
+    MiniResult persist_result = project->store->set_image_processed_path(image_id, rel_frame.generic_string(), &persist_error);
+    if (persist_result.code != MINI_OK) {
+        return fail(persist_result.code, persist_error.empty() ? "failed to persist processed frame path" : persist_error);
+    }
+
+    return success();
+#endif
 }
 
 MiniResult mini_build_preview_asset(MiniProjectHandle, MiniPreviewBuildOptions) {

@@ -37,6 +37,7 @@ public:
     MiniResult import_capture_image(const std::string& source_image_path, int angle_index, double estimated_angle_degrees, uint64_t* out_image_id, std::string* out_error);
     MiniResult set_image_quality_score(uint64_t image_id, double quality_score, std::string* out_error);
     MiniResult set_image_mask_path(uint64_t image_id, const std::string& mask_path, std::string* out_error);
+    MiniResult set_image_processed_path(uint64_t image_id, const std::string& processed_path, std::string* out_error);
 
     const std::string& project_dir() const { return project_dir_; }
     const ProjectMetadata& metadata() const { return metadata_; }
