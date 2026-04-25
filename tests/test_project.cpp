@@ -244,9 +244,42 @@ int main() {
         std::cerr << "expected dark image warning for image_b\n";
         return 1;
     }
+
+    MiniPreviewBuildOptions preview_options{};
+    preview_options.minimum_frames = 2;
+    result = mini_build_preview_asset(reopened, preview_options);
+    if (result.code != MINI_OK) {
+        std::cerr << "mini_build_preview_asset failed: " << mini_get_last_error() << "\n";
+        return 1;
+    }
+
+    const fs::path preview_json_path = project_dir / "preview" / "preview.json";
+    const fs::path thumbnail_path = project_dir / "preview" / "thumbnail.png";
+    if (!fs::exists(preview_json_path)) {
+        std::cerr << "preview.json was not generated\n";
+        return 1;
+    }
+    if (!fs::exists(thumbnail_path)) {
+        std::cerr << "thumbnail.png was not generated\n";
+        return 1;
+    }
+
+    cv::Mat thumbnail = cv::imread(thumbnail_path.string(), cv::IMREAD_UNCHANGED);
+    if (thumbnail.empty() || thumbnail.rows != 256 || thumbnail.cols != 256) {
+        std::cerr << "thumbnail should be a non-empty 256x256 image\n";
+        return 1;
+    }
 #else
     if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
         std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED when OpenCV is unavailable\n";
+        return 1;
+    }
+
+    MiniPreviewBuildOptions preview_options{};
+    preview_options.minimum_frames = 2;
+    result = mini_build_preview_asset(reopened, preview_options);
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED for mini_build_preview_asset without OpenCV\n";
         return 1;
     }
 #endif
@@ -296,6 +329,17 @@ int main() {
 #if defined(MINI_PAINTER_HAS_OPENCV)
     if (json_text.find("\"processed_image_path\": \"processed/frame_001.png\"") == std::string::npos) {
         std::cerr << "project.json does not contain expected processed image metadata\n";
+        return 1;
+    }
+
+    std::ifstream preview_in(project_dir / "preview" / "preview.json");
+    std::string preview_json_text((std::istreambuf_iterator<char>(preview_in)), std::istreambuf_iterator<char>());
+    if (preview_json_text.find("\"type\": \"multi_angle_impostor\"") == std::string::npos ||
+        preview_json_text.find("\"frame_count\": 2") == std::string::npos ||
+        preview_json_text.find("\"path\": \"processed/frame_001.png\"") == std::string::npos ||
+        preview_json_text.find("\"path\": \"processed/frame_002.png\"") == std::string::npos ||
+        preview_json_text.find("\"thumbnail\": \"preview/thumbnail.png\"") == std::string::npos) {
+        std::cerr << "preview.json does not contain expected preview metadata\n";
         return 1;
     }
 #endif
