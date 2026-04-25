@@ -151,6 +151,14 @@ int main() {
         return 1;
     }
 
+    MiniFrameOptions frame_options{};
+    frame_options.normalize_canvas = 1;
+    result = mini_generate_processed_frame(reopened, image_a, frame_options);
+    if (result.code != MINI_OK) {
+        std::cerr << "mini_generate_processed_frame failed: " << mini_get_last_error() << "\n";
+        return 1;
+    }
+
     const fs::path cleaned_mask_path = project_dir / "masks" / "mask_1.png";
     if (!fs::exists(cleaned_mask_path)) {
         std::cerr << "cleaned mask file was not written\n";
@@ -175,6 +183,26 @@ int main() {
         std::cerr << "hole should have been filled after cleanup\n";
         return 1;
     }
+
+    const fs::path processed_frame_path = project_dir / "processed" / "frame_001.png";
+    if (!fs::exists(processed_frame_path)) {
+        std::cerr << "processed frame file was not written\n";
+        return 1;
+    }
+    cv::Mat processed_frame = cv::imread(processed_frame_path.string(), cv::IMREAD_UNCHANGED);
+    if (processed_frame.empty() || processed_frame.type() != CV_8UC4) {
+        std::cerr << "processed frame should be a non-empty RGBA PNG\n";
+        return 1;
+    }
+    if (processed_frame.rows != processed_frame.cols) {
+        std::cerr << "processed frame should be normalized to a square canvas\n";
+        return 1;
+    }
+    const cv::Vec4b top_left = processed_frame.at<cv::Vec4b>(0, 0);
+    if (top_left[3] != 0) {
+        std::cerr << "processed frame background should preserve transparency\n";
+        return 1;
+    }
 #else
     result = mini_set_external_mask(reopened, image_a, source_a.string().c_str());
     if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
@@ -186,6 +214,14 @@ int main() {
     result = mini_cleanup_mask(reopened, image_a, cleanup_options);
     if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
         std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED for mini_cleanup_mask without OpenCV\n";
+        return 1;
+    }
+
+    MiniFrameOptions frame_options{};
+    frame_options.normalize_canvas = 1;
+    result = mini_generate_processed_frame(reopened, image_a, frame_options);
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED for mini_generate_processed_frame without OpenCV\n";
         return 1;
     }
 #endif
@@ -257,6 +293,12 @@ int main() {
         std::cerr << "project.json does not contain expected capture metadata\n";
         return 1;
     }
+#if defined(MINI_PAINTER_HAS_OPENCV)
+    if (json_text.find("\"processed_image_path\": \"processed/frame_001.png\"") == std::string::npos) {
+        std::cerr << "project.json does not contain expected processed image metadata\n";
+        return 1;
+    }
+#endif
 
     fs::remove_all(root, ec);
 

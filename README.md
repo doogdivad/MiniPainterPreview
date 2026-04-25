@@ -89,3 +89,15 @@ The original C++ library scaffold remains in the repository root for iterative n
     - `mini_painter_cli set-mask --project <project_dir> --image-id <id> --mask <path>`
     - `mini_painter_cli cleanup-mask --project <project_dir> --image-id <id> [--remove-islands <px>] [--fill-holes <0|1>] [--feather <px>] [--dilate-erode <-n..n>]`
   - tests now validate mask write/import and cleanup behavior.
+
+- ✅ Milestone 5: processed frame generation is now implemented in `mini_painter_core`:
+  - `mini_generate_processed_frame` now:
+    - loads source image + mask (or generates fallback threshold mask)
+    - applies alpha mask to create transparent PNG output
+    - crops to subject bounds
+    - optionally normalizes to square canvas
+    - writes frame into `processed/frame_XXX.png`
+  - processed-frame path is persisted in `project.json` (`processed_image_path`)
+  - CLI support via:
+    - `mini_painter_cli generate-frame --project <project_dir> --image-id <id> [--normalize-canvas <0|1>]`
+  - tests now validate RGBA output generation and transparency behavior.

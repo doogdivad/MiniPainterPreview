@@ -12,6 +12,7 @@ int usage() {
     std::cerr << "  mini_painter_cli analyse --project <project_dir> --image-id <id>\n";
     std::cerr << "  mini_painter_cli set-mask --project <project_dir> --image-id <id> --mask <path>\n";
     std::cerr << "  mini_painter_cli cleanup-mask --project <project_dir> --image-id <id> [--remove-islands <px>] [--fill-holes <0|1>] [--feather <px>] [--dilate-erode <-n..n>]\n";
+    std::cerr << "  mini_painter_cli generate-frame --project <project_dir> --image-id <id> [--normalize-canvas <0|1>]\n";
     return 1;
 }
 
@@ -238,6 +239,48 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "Mask cleanup finished.\n";
+        return 0;
+    }
+
+    if (command == "generate-frame") {
+        std::string project_path;
+        std::string image_id_text;
+        MiniFrameOptions options{};
+        options.normalize_canvas = 1;
+        for (int i = 2; i + 1 < argc; i += 2) {
+            std::string key = argv[i];
+            std::string value = argv[i + 1];
+            if (key == "--project") {
+                project_path = value;
+            } else if (key == "--image-id") {
+                image_id_text = value;
+            } else if (key == "--normalize-canvas") {
+                options.normalize_canvas = std::stoi(value);
+            } else {
+                std::cerr << "Unknown option: " << key << "\n";
+                return usage();
+            }
+        }
+
+        if (project_path.empty() || image_id_text.empty()) {
+            return usage();
+        }
+
+        MiniProjectHandle project = nullptr;
+        MiniResult result = mini_open_project(project_path.c_str(), &project);
+        if (result.code != MINI_OK) {
+            std::cerr << "open failed: " << mini_get_last_error() << "\n";
+            return 2;
+        }
+
+        result = mini_generate_processed_frame(project, static_cast<MiniImageId>(std::stoull(image_id_text)), options);
+        mini_close_project(project);
+        if (result.code != MINI_OK) {
+            std::cerr << "generate-frame failed: " << mini_get_last_error() << "\n";
+            return 3;
+        }
+
+        std::cout << "Processed frame generated.\n";
         return 0;
     }
 
