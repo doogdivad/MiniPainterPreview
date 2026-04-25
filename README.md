@@ -1,47 +1,63 @@
-# Mini Painter Core (Milestones 1-2)
+# Mini Painter Android Frontend (Stubbed Native Backend)
 
-This repository contains a portable C++ core library scaffold for Mini Painter.
+This repository now contains a Kotlin Android app prototype for **Mini Painter** plus a JNI C++ stub backend so frontend work can proceed before the full native core is integrated.
 
-## Build
+## What is included
 
-```bash
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
+- Jetpack Compose app shell with AndroidX Navigation.
+- Local-first project library stored in app-private storage (`files/minis`).
+- CameraX capture flow with quality capture mode.
+- JNI bridge (`MiniPainterNative`) returning JSON payloads parsed in Kotlin.
+- NDK + CMake native module (`mini_painter_jni`) with stubbed behavior:
+  - creates project folders and `project.json`
+  - imports capture images to `raw/`
+  - returns fake quality reports
+  - builds a fake preview manifest by reusing imported images
+- Screens:
+  - Home
+  - Project Detail
+  - Capture
+  - Preview
+  - Paint (placeholder)
+
+## Android build prerequisites
+
+- Android Studio (recent stable)
+- Android SDK with API 35 (or adjust in `app/build.gradle.kts`)
+- Android NDK + CMake installed from SDK Manager
+
+## Build and run
+
+1. Open this repository in Android Studio.
+2. Let Gradle sync.
+3. Select an emulator/device (API 26+).
+4. Run the `app` module.
+
+## Storage layout
+
+The app writes all data to app-private storage:
+
+```text
+<context.filesDir>/minis/{project_id}/
+  project.json
+  raw/
+  masks/
+  processed/
+  preview/
+  schemes/
 ```
 
-## Targets
+No broad storage permissions are requested.
 
-- `mini_painter_core`: static library exposing a stable C API wrapper.
-- `mini_painter_cli`: minimal CLI tool (`create`, `import`).
-- `mini_painter_tests`: executable test for project lifecycle and image import metadata persistence.
+## Native integration and stub mode
 
-## Implemented so far
+The JNI layer is built from:
 
-- CMake-based project structure.
-- Public C API declarations for all planned endpoints.
-- Working project lifecycle API:
-  - `mini_create_project`
-  - `mini_open_project`
-  - `mini_save_project`
-  - `mini_close_project`
-- Local project folder creation using the required directory layout.
-- Basic CLI `create` command.
-- Image import API (`mini_import_capture_image`) with:
-  - JPEG/PNG extension validation
-  - copy into `raw/` as `image_###.<ext>`
-  - generated `image_id`
-  - metadata persistence in `project.json` `capture_set`
-  - no overwrite of existing destination files
-- CLI `import` command.
-- Tests for project create/save/open plus import/reload metadata behavior.
+- `app/src/main/cpp/CMakeLists.txt`
+- `app/src/main/cpp/mini_painter_jni.cpp`
 
-## Not implemented yet
+The current implementation is a stub. Later, replace it by linking the real C++ core with CMake `add_subdirectory(...)` and swapping stub logic for production calls.
 
-The remaining APIs currently return `MINI_ERROR_NOT_IMPLEMENTED` and will be delivered incrementally in later milestones:
+## Existing C++ core scaffold
 
-- quality analysis
-- segmentation/mask processing
-- processed frame generation
-- preview asset generation
-- paint scheme and rendering
+The original C++ library scaffold remains in the repository root for iterative native development and tests.
