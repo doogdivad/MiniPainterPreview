@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #if defined(MINI_PAINTER_HAS_OPENCV)
@@ -190,12 +191,206 @@ MiniResult mini_analyse_image_quality(MiniProjectHandle project, MiniImageId ima
 #endif
 }
 
-MiniResult mini_set_external_mask(MiniProjectHandle, MiniImageId, const char*) {
-    return not_implemented("mini_set_external_mask");
+#if defined(MINI_PAINTER_HAS_OPENCV)
+namespace {
+bool write_binary_mask_png(const cv::Mat& mask, const std::filesystem::path& output_path, std::string* out_error) {
+    cv::Mat normalized_mask;
+    if (mask.type() == CV_8UC1) {
+        normalized_mask = mask;
+    } else {
+        mask.convertTo(normalized_mask, CV_8UC1);
+    }
+    cv::threshold(normalized_mask, normalized_mask, 0, 255, cv::THRESH_BINARY);
+    if (!cv::imwrite(output_path.string(), normalized_mask)) {
+        *out_error = "failed to write mask png";
+        return false;
+    }
+    return true;
 }
 
-MiniResult mini_cleanup_mask(MiniProjectHandle, MiniImageId, MiniMaskCleanupOptions) {
-    return not_implemented("mini_cleanup_mask");
+MiniResult generate_fallback_mask(const cv::Mat& image, cv::Mat* out_mask, std::string* out_error) {
+    if (out_mask == nullptr || out_error == nullptr) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "invalid output pointers for fallback mask generation");
+    }
+
+    cv::Mat gray;
+    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat thresholded;
+    cv::threshold(gray, thresholded, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    const int white_pixels = cv::countNonZero(thresholded);
+    const int total_pixels = thresholded.rows * thresholded.cols;
+    if (white_pixels > (total_pixels / 2)) {
+        cv::bitwise_not(thresholded, thresholded);
+    }
+
+    cv::Mat morph_kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+    cv::morphologyEx(thresholded, *out_mask, cv::MORPH_OPEN, morph_kernel);
+    cv::morphologyEx(*out_mask, *out_mask, cv::MORPH_CLOSE, morph_kernel);
+    return success();
+}
+
+MiniResult resolve_image_and_mask_paths(MiniProjectHandle project, MiniImageId image_id, std::filesystem::path* out_image_path, std::filesystem::path* out_mask_path) {
+    const auto& capture_set = project->store->metadata().capture_set;
+    auto image_it = std::find_if(capture_set.begin(), capture_set.end(), [image_id](const mini::ProjectMetadata::CaptureImage& image) {
+        return image.image_id == image_id;
+    });
+    if (image_it == capture_set.end()) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "image id not found in capture_set");
+    }
+
+    std::ostringstream mask_name;
+    mask_name << "mask_" << image_id << ".png";
+
+    if (out_image_path != nullptr) {
+        *out_image_path = std::filesystem::path(project->store->project_dir()) / image_it->file_path;
+    }
+    if (out_mask_path != nullptr) {
+        *out_mask_path = std::filesystem::path(project->store->project_dir()) / "masks" / mask_name.str();
+    }
+    return success();
+}
+}  // namespace
+#endif
+
+MiniResult mini_set_external_mask(MiniProjectHandle project, MiniImageId image_id, const char* mask_png_path) {
+#if !defined(MINI_PAINTER_HAS_OPENCV)
+    (void) project;
+    (void) image_id;
+    (void) mask_png_path;
+    return not_implemented("mini_set_external_mask (OpenCV not available)");
+#else
+    if (project == nullptr || image_id == 0 || mask_png_path == nullptr) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "mini_set_external_mask received invalid argument");
+    }
+
+    const std::filesystem::path source_path(mask_png_path);
+    if (!std::filesystem::exists(source_path)) {
+        return fail(MINI_ERROR_FILE_NOT_FOUND, "mask png path does not exist");
+    }
+
+    std::filesystem::path image_path;
+    std::filesystem::path output_mask_path;
+    MiniResult resolve_result = resolve_image_and_mask_paths(project, image_id, &image_path, &output_mask_path);
+    if (resolve_result.code != MINI_OK) {
+        return resolve_result;
+    }
+
+    cv::Mat source_mask = cv::imread(source_path.string(), cv::IMREAD_GRAYSCALE);
+    if (source_mask.empty()) {
+        return fail(MINI_ERROR_IMAGE_DECODE, "failed to decode external mask png");
+    }
+
+    cv::Mat source_image = cv::imread(image_path.string(), cv::IMREAD_COLOR);
+    if (source_image.empty()) {
+        return fail(MINI_ERROR_IMAGE_DECODE, "failed to decode source capture image");
+    }
+
+    if (source_mask.size() != source_image.size()) {
+        cv::resize(source_mask, source_mask, source_image.size(), 0, 0, cv::INTER_NEAREST);
+    }
+
+    std::string write_error;
+    if (!write_binary_mask_png(source_mask, output_mask_path, &write_error)) {
+        return fail(MINI_ERROR_IO, write_error);
+    }
+
+    std::string save_error;
+    const std::filesystem::path rel_mask = std::filesystem::path("masks") / output_mask_path.filename();
+    MiniResult save_result = project->store->set_image_mask_path(image_id, rel_mask.generic_string(), &save_error);
+    if (save_result.code != MINI_OK) {
+        return fail(save_result.code, save_error.empty() ? "failed to persist image mask path" : save_error);
+    }
+
+    return success();
+#endif
+}
+
+MiniResult mini_cleanup_mask(MiniProjectHandle project, MiniImageId image_id, MiniMaskCleanupOptions options) {
+#if !defined(MINI_PAINTER_HAS_OPENCV)
+    (void) project;
+    (void) image_id;
+    (void) options;
+    return not_implemented("mini_cleanup_mask (OpenCV not available)");
+#else
+    if (project == nullptr || image_id == 0) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "mini_cleanup_mask received invalid argument");
+    }
+
+    std::filesystem::path image_path;
+    std::filesystem::path output_mask_path;
+    MiniResult resolve_result = resolve_image_and_mask_paths(project, image_id, &image_path, &output_mask_path);
+    if (resolve_result.code != MINI_OK) {
+        return resolve_result;
+    }
+
+    cv::Mat mask = cv::imread(output_mask_path.string(), cv::IMREAD_GRAYSCALE);
+    if (mask.empty()) {
+        cv::Mat source_image = cv::imread(image_path.string(), cv::IMREAD_COLOR);
+        if (source_image.empty()) {
+            return fail(MINI_ERROR_IMAGE_DECODE, "failed to decode source image for fallback mask");
+        }
+        std::string fallback_error;
+        MiniResult fallback_result = generate_fallback_mask(source_image, &mask, &fallback_error);
+        if (fallback_result.code != MINI_OK) {
+            return fail(fallback_result.code, fallback_error.empty() ? "fallback mask generation failed" : fallback_error);
+        }
+    }
+
+    cv::threshold(mask, mask, 0, 255, cv::THRESH_BINARY);
+
+    if (options.remove_small_islands > 0) {
+        cv::Mat labels;
+        cv::Mat stats;
+        cv::Mat centroids;
+        const int num_labels = cv::connectedComponentsWithStats(mask, labels, stats, centroids, 8, CV_32S);
+        cv::Mat cleaned = cv::Mat::zeros(mask.size(), CV_8UC1);
+        for (int label = 1; label < num_labels; ++label) {
+            const int area = stats.at<int>(label, cv::CC_STAT_AREA);
+            if (area >= options.remove_small_islands) {
+                cleaned.setTo(255, labels == label);
+            }
+        }
+        mask = cleaned;
+    }
+
+    if (options.fill_holes > 0) {
+        cv::Mat flood = mask.clone();
+        cv::floodFill(flood, cv::Point(0, 0), cv::Scalar(255));
+        cv::Mat flood_inv;
+        cv::bitwise_not(flood, flood_inv);
+        mask |= flood_inv;
+    }
+
+    if (options.dilate_erode_amount != 0) {
+        const int kernel_size = std::max(1, std::abs(options.dilate_erode_amount) * 2 + 1);
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(kernel_size, kernel_size));
+        if (options.dilate_erode_amount > 0) {
+            cv::dilate(mask, mask, kernel);
+        } else {
+            cv::erode(mask, mask, kernel);
+        }
+    }
+
+    if (options.feather_edge > 0) {
+        const int blur_size = std::max(1, options.feather_edge * 2 + 1);
+        cv::GaussianBlur(mask, mask, cv::Size(blur_size, blur_size), 0.0);
+        cv::threshold(mask, mask, 127, 255, cv::THRESH_BINARY);
+    }
+
+    std::string write_error;
+    if (!write_binary_mask_png(mask, output_mask_path, &write_error)) {
+        return fail(MINI_ERROR_IO, write_error);
+    }
+
+    std::string save_error;
+    const std::filesystem::path rel_mask = std::filesystem::path("masks") / output_mask_path.filename();
+    MiniResult save_result = project->store->set_image_mask_path(image_id, rel_mask.generic_string(), &save_error);
+    if (save_result.code != MINI_OK) {
+        return fail(save_result.code, save_error.empty() ? "failed to persist cleaned mask path" : save_error);
+    }
+
+    return success();
+#endif
 }
 
 MiniResult mini_generate_processed_frame(MiniProjectHandle, MiniImageId, MiniFrameOptions) {

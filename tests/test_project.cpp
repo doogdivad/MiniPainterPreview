@@ -122,6 +122,74 @@ int main() {
     }
 #endif
 
+#if defined(MINI_PAINTER_HAS_OPENCV)
+    const fs::path external_mask_path = root / "external_mask.png";
+    cv::Mat external_mask(200, 200, CV_8UC1, cv::Scalar(0));
+    cv::rectangle(external_mask, cv::Point(20, 20), cv::Point(180, 180), cv::Scalar(255), cv::FILLED);
+    cv::circle(external_mask, cv::Point(100, 100), 30, cv::Scalar(0), cv::FILLED);      // large hole
+    cv::rectangle(external_mask, cv::Point(2, 2), cv::Point(6, 6), cv::Scalar(255), cv::FILLED);  // tiny island
+    if (!cv::imwrite(external_mask_path.string(), external_mask)) {
+        std::cerr << "failed to write external mask fixture\n";
+        return 1;
+    }
+
+    result = mini_set_external_mask(reopened, image_a, external_mask_path.string().c_str());
+    if (result.code != MINI_OK) {
+        std::cerr << "mini_set_external_mask failed: " << mini_get_last_error() << "\n";
+        return 1;
+    }
+
+    MiniMaskCleanupOptions cleanup_options{};
+    cleanup_options.remove_small_islands = 128;
+    cleanup_options.fill_holes = 1;
+    cleanup_options.feather_edge = 0;
+    cleanup_options.dilate_erode_amount = 0;
+
+    result = mini_cleanup_mask(reopened, image_a, cleanup_options);
+    if (result.code != MINI_OK) {
+        std::cerr << "mini_cleanup_mask failed: " << mini_get_last_error() << "\n";
+        return 1;
+    }
+
+    const fs::path cleaned_mask_path = project_dir / "masks" / "mask_1.png";
+    if (!fs::exists(cleaned_mask_path)) {
+        std::cerr << "cleaned mask file was not written\n";
+        return 1;
+    }
+
+    cv::Mat cleaned_mask = cv::imread(cleaned_mask_path.string(), cv::IMREAD_GRAYSCALE);
+    if (cleaned_mask.empty()) {
+        std::cerr << "failed to load cleaned mask\n";
+        return 1;
+    }
+    if (cleaned_mask.rows != 640 || cleaned_mask.cols != 640) {
+        std::cerr << "cleaned mask dimensions do not match source image\n";
+        return 1;
+    }
+
+    if (cleaned_mask.at<uint8_t>(0, 0) != 0) {
+        std::cerr << "small island should have been removed after cleanup\n";
+        return 1;
+    }
+    if (cleaned_mask.at<uint8_t>(320, 320) != 255) {
+        std::cerr << "hole should have been filled after cleanup\n";
+        return 1;
+    }
+#else
+    result = mini_set_external_mask(reopened, image_a, source_a.string().c_str());
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED for mini_set_external_mask without OpenCV\n";
+        return 1;
+    }
+
+    MiniMaskCleanupOptions cleanup_options{};
+    result = mini_cleanup_mask(reopened, image_a, cleanup_options);
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED for mini_cleanup_mask without OpenCV\n";
+        return 1;
+    }
+#endif
+
     MiniImageId image_b = 0;
     result = mini_import_capture_image(reopened, source_b.string().c_str(), 1, 15.0, &image_b);
     if (result.code != MINI_OK || image_b != image_a + 1) {

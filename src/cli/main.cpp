@@ -10,6 +10,8 @@ int usage() {
     std::cerr << "  mini_painter_cli create --root <dir> --name <display_name>\n";
     std::cerr << "  mini_painter_cli import --project <project_dir> --image <path> --angle <index> [--degrees <value>]\n";
     std::cerr << "  mini_painter_cli analyse --project <project_dir> --image-id <id>\n";
+    std::cerr << "  mini_painter_cli set-mask --project <project_dir> --image-id <id> --mask <path>\n";
+    std::cerr << "  mini_painter_cli cleanup-mask --project <project_dir> --image-id <id> [--remove-islands <px>] [--fill-holes <0|1>] [--feather <px>] [--dilate-erode <-n..n>]\n";
     return 1;
 }
 
@@ -148,6 +150,94 @@ int main(int argc, char** argv) {
         std::cout << "  height: " << report.height << "\n";
         std::cout << "  subject_coverage_estimate: " << report.subject_coverage_estimate << "\n";
         std::cout << "  warning_flags: " << report.warning_flags << "\n";
+        return 0;
+    }
+
+    if (command == "set-mask") {
+        std::string project_path;
+        std::string image_id_text;
+        std::string mask_path;
+        for (int i = 2; i + 1 < argc; i += 2) {
+            std::string key = argv[i];
+            std::string value = argv[i + 1];
+            if (key == "--project") {
+                project_path = value;
+            } else if (key == "--image-id") {
+                image_id_text = value;
+            } else if (key == "--mask") {
+                mask_path = value;
+            } else {
+                std::cerr << "Unknown option: " << key << "\n";
+                return usage();
+            }
+        }
+
+        if (project_path.empty() || image_id_text.empty() || mask_path.empty()) {
+            return usage();
+        }
+
+        MiniProjectHandle project = nullptr;
+        MiniResult result = mini_open_project(project_path.c_str(), &project);
+        if (result.code != MINI_OK) {
+            std::cerr << "open failed: " << mini_get_last_error() << "\n";
+            return 2;
+        }
+
+        result = mini_set_external_mask(project, static_cast<MiniImageId>(std::stoull(image_id_text)), mask_path.c_str());
+        mini_close_project(project);
+        if (result.code != MINI_OK) {
+            std::cerr << "set-mask failed: " << mini_get_last_error() << "\n";
+            return 3;
+        }
+
+        std::cout << "Mask imported and normalized.\n";
+        return 0;
+    }
+
+    if (command == "cleanup-mask") {
+        std::string project_path;
+        std::string image_id_text;
+        MiniMaskCleanupOptions options{};
+        for (int i = 2; i + 1 < argc; i += 2) {
+            std::string key = argv[i];
+            std::string value = argv[i + 1];
+            if (key == "--project") {
+                project_path = value;
+            } else if (key == "--image-id") {
+                image_id_text = value;
+            } else if (key == "--remove-islands") {
+                options.remove_small_islands = std::stoi(value);
+            } else if (key == "--fill-holes") {
+                options.fill_holes = std::stoi(value);
+            } else if (key == "--feather") {
+                options.feather_edge = std::stoi(value);
+            } else if (key == "--dilate-erode") {
+                options.dilate_erode_amount = std::stoi(value);
+            } else {
+                std::cerr << "Unknown option: " << key << "\n";
+                return usage();
+            }
+        }
+
+        if (project_path.empty() || image_id_text.empty()) {
+            return usage();
+        }
+
+        MiniProjectHandle project = nullptr;
+        MiniResult result = mini_open_project(project_path.c_str(), &project);
+        if (result.code != MINI_OK) {
+            std::cerr << "open failed: " << mini_get_last_error() << "\n";
+            return 2;
+        }
+
+        result = mini_cleanup_mask(project, static_cast<MiniImageId>(std::stoull(image_id_text)), options);
+        mini_close_project(project);
+        if (result.code != MINI_OK) {
+            std::cerr << "cleanup-mask failed: " << mini_get_last_error() << "\n";
+            return 3;
+        }
+
+        std::cout << "Mask cleanup finished.\n";
         return 0;
     }
 
