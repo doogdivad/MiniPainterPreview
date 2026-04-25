@@ -76,3 +76,16 @@ The original C++ library scaffold remains in the repository root for iterative n
 
 > Note: when OpenCV is not available in the build environment, the project still builds, but
 > `mini_analyse_image_quality` returns `MINI_ERROR_NOT_IMPLEMENTED`.
+
+- ✅ Milestone 4: mask handling is now implemented in `mini_painter_core`:
+  - external mask import via `mini_set_external_mask`
+  - fallback threshold-based background segmentation when no mask exists
+  - mask cleanup pipeline via `mini_cleanup_mask`:
+    - remove small islands (connected component size filter)
+    - fill holes
+    - optional feather + dilate/erode operations
+  - mask metadata persisted into `project.json` under each capture image
+  - CLI support via:
+    - `mini_painter_cli set-mask --project <project_dir> --image-id <id> --mask <path>`
+    - `mini_painter_cli cleanup-mask --project <project_dir> --image-id <id> [--remove-islands <px>] [--fill-holes <0|1>] [--feather <px>] [--dilate-erode <-n..n>]`
+  - tests now validate mask write/import and cleanup behavior.
