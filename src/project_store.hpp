@@ -35,8 +35,10 @@ public:
     static MiniResult open(const std::string& project_dir, ProjectStore** out_store, std::string* out_error);
     MiniResult save(std::string* out_error) const;
     MiniResult import_capture_image(const std::string& source_image_path, int angle_index, double estimated_angle_degrees, uint64_t* out_image_id, std::string* out_error);
+    MiniResult set_image_quality_score(uint64_t image_id, double quality_score, std::string* out_error);
 
     const std::string& project_dir() const { return project_dir_; }
+    const ProjectMetadata& metadata() const { return metadata_; }
 
 private:
     std::string root_dir_;

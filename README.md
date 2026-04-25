@@ -61,3 +61,18 @@ The current implementation is a stub. Later, replace it by linking the real C++ 
 ## Existing C++ core scaffold
 
 The original C++ library scaffold remains in the repository root for iterative native development and tests.
+
+## Native core progress (milestones)
+
+- ✅ Milestone 1: skeleton library/CLI/tests + project create/open/save.
+- ✅ Milestone 2: JPEG/PNG import into `raw/` with persisted capture metadata.
+- ✅ Milestone 3: image quality analysis is now implemented in `mini_painter_core`:
+  - OpenCV-based decode + metrics (blur, exposure, dimensions, subject coverage estimate)
+  - warning flags (`too blurry`, `too dark`, `too bright`, `likely cropped`, `low resolution`)
+  - persisted per-image `quality_score`
+  - CLI support via:
+    - `mini_painter_cli analyse --project <project_dir> --image-id <id>`
+  - tests now cover valid-image quality analysis and corrupt-image decode handling.
+
+> Note: when OpenCV is not available in the build environment, the project still builds, but
+> `mini_analyse_image_quality` returns `MINI_ERROR_NOT_IMPLEMENTED`.

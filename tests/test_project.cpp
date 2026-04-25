@@ -1,6 +1,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <string>
+
+#if defined(MINI_PAINTER_HAS_OPENCV)
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#endif
 
 #include "mini_painter/mini_painter.h"
 
@@ -60,6 +66,22 @@ int main() {
 
     const fs::path source_a = root / "input_a.jpg";
     const fs::path source_b = root / "input_b.png";
+    const fs::path source_corrupt = root / "input_corrupt.jpg";
+
+#if defined(MINI_PAINTER_HAS_OPENCV)
+    cv::Mat clear_image(640, 640, CV_8UC3, cv::Scalar(10, 10, 10));
+    cv::rectangle(clear_image, cv::Point(180, 180), cv::Point(460, 460), cv::Scalar(230, 230, 230), cv::FILLED);
+    if (!cv::imwrite(source_a.string(), clear_image)) {
+        std::cerr << "failed to write source_a image fixture\n";
+        return 1;
+    }
+
+    cv::Mat dark_image(400, 400, CV_8UC3, cv::Scalar(8, 8, 8));
+    if (!cv::imwrite(source_b.string(), dark_image)) {
+        std::cerr << "failed to write source_b image fixture\n";
+        return 1;
+    }
+#else
     {
         std::ofstream out(source_a);
         out << "fake-jpeg-data";
@@ -68,6 +90,12 @@ int main() {
         std::ofstream out(source_b);
         out << "fake-png-data";
     }
+#endif
+
+    {
+        std::ofstream out(source_corrupt);
+        out << "not a real image";
+    }
 
     MiniImageId image_a = 0;
     result = mini_import_capture_image(reopened, source_a.string().c_str(), 0, 0.0, &image_a);
@@ -75,22 +103,72 @@ int main() {
         std::cerr << "mini_import_capture_image #1 failed: " << mini_get_last_error() << "\n";
         return 1;
     }
-    mini_close_project(reopened);
 
-    MiniProjectHandle reopened_again = nullptr;
-    result = mini_open_project(project_dir.string().c_str(), &reopened_again);
-    if (result.code != MINI_OK || reopened_again == nullptr) {
-        std::cerr << "mini_open_project (reopen 2) failed: " << mini_get_last_error() << "\n";
+    MiniImageQualityReport report_a{};
+    result = mini_analyse_image_quality(reopened, image_a, &report_a);
+#if defined(MINI_PAINTER_HAS_OPENCV)
+    if (result.code != MINI_OK) {
+        std::cerr << "mini_analyse_image_quality #1 failed: " << mini_get_last_error() << "\n";
         return 1;
     }
+    if (report_a.width != 640 || report_a.height != 640) {
+        std::cerr << "quality report size mismatch for image_a\n";
+        return 1;
+    }
+#else
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED when OpenCV is unavailable\n";
+        return 1;
+    }
+#endif
 
     MiniImageId image_b = 0;
-    result = mini_import_capture_image(reopened_again, source_b.string().c_str(), 1, 15.0, &image_b);
+    result = mini_import_capture_image(reopened, source_b.string().c_str(), 1, 15.0, &image_b);
     if (result.code != MINI_OK || image_b != image_a + 1) {
         std::cerr << "mini_import_capture_image #2 failed: " << mini_get_last_error() << "\n";
         return 1;
     }
-    mini_close_project(reopened_again);
+
+    MiniImageQualityReport report_b{};
+    result = mini_analyse_image_quality(reopened, image_b, &report_b);
+#if defined(MINI_PAINTER_HAS_OPENCV)
+    if (result.code != MINI_OK) {
+        std::cerr << "mini_analyse_image_quality #2 failed: " << mini_get_last_error() << "\n";
+        return 1;
+    }
+    if ((report_b.warning_flags & MINI_IMAGE_WARNING_TOO_DARK) == 0u) {
+        std::cerr << "expected dark image warning for image_b\n";
+        return 1;
+    }
+#else
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED when OpenCV is unavailable\n";
+        return 1;
+    }
+#endif
+
+    MiniImageId image_corrupt = 0;
+    result = mini_import_capture_image(reopened, source_corrupt.string().c_str(), 2, 30.0, &image_corrupt);
+    if (result.code != MINI_OK || image_corrupt != image_b + 1) {
+        std::cerr << "mini_import_capture_image #3 failed: " << mini_get_last_error() << "\n";
+        return 1;
+    }
+
+    MiniImageQualityReport report_corrupt{};
+    result = mini_analyse_image_quality(reopened, image_corrupt, &report_corrupt);
+#if defined(MINI_PAINTER_HAS_OPENCV)
+    if (result.code != MINI_ERROR_IMAGE_DECODE) {
+        std::cerr << "expected MINI_ERROR_IMAGE_DECODE for corrupt image but received: " << result.code << "\n";
+        return 1;
+    }
+#else
+    if (result.code != MINI_ERROR_NOT_IMPLEMENTED) {
+        std::cerr << "expected MINI_ERROR_NOT_IMPLEMENTED when OpenCV is unavailable\n";
+        return 1;
+    }
+#endif
+
+    mini_close_project(reopened);
 
     if (!fs::exists(project_dir / "raw" / "image_001.jpg")) {
         std::cerr << "imported JPEG was not copied to raw/\n";

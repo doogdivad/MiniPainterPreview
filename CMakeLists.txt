@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MINI_PAINTER_BUILD_TESTS "Build tests" ON)
+find_package(OpenCV QUIET COMPONENTS core imgcodecs imgproc)
 
 add_library(mini_painter_core STATIC
     src/c_api.cpp
@@ -21,6 +22,12 @@ target_include_directories(mini_painter_core
 )
 
 target_compile_features(mini_painter_core PUBLIC cxx_std_17)
+if(OpenCV_FOUND)
+    target_compile_definitions(mini_painter_core PRIVATE MINI_PAINTER_HAS_OPENCV=1)
+    target_link_libraries(mini_painter_core PRIVATE ${OpenCV_LIBS})
+else()
+    message(WARNING "OpenCV was not found. mini_analyse_image_quality will return MINI_ERROR_NOT_IMPLEMENTED.")
+endif()
 
 add_executable(mini_painter_cli
     src/cli/main.cpp
@@ -31,6 +38,11 @@ target_link_libraries(mini_painter_cli PRIVATE mini_painter_core)
 if(MINI_PAINTER_BUILD_TESTS)
     enable_testing()
     add_executable(mini_painter_tests tests/test_project.cpp)
-    target_link_libraries(mini_painter_tests PRIVATE mini_painter_core)
+    if(OpenCV_FOUND)
+        target_compile_definitions(mini_painter_tests PRIVATE MINI_PAINTER_HAS_OPENCV=1)
+        target_link_libraries(mini_painter_tests PRIVATE mini_painter_core ${OpenCV_LIBS})
+    else()
+        target_link_libraries(mini_painter_tests PRIVATE mini_painter_core)
+    endif()
     add_test(NAME mini_painter_tests COMMAND mini_painter_tests)
 endif()
