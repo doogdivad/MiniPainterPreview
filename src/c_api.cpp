@@ -82,8 +82,17 @@ void mini_close_project(MiniProjectHandle project) {
     delete project;
 }
 
-MiniResult mini_import_capture_image(MiniProjectHandle, const char*, int, double, MiniImageId*) {
-    return not_implemented("mini_import_capture_image");
+MiniResult mini_import_capture_image(MiniProjectHandle project, const char* source_image_path, int angle_index, double estimated_angle_degrees, MiniImageId* out_image_id) {
+    if (project == nullptr || source_image_path == nullptr || out_image_id == nullptr) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "mini_import_capture_image received null argument");
+    }
+
+    std::string error;
+    MiniResult result = project->store->import_capture_image(source_image_path, angle_index, estimated_angle_degrees, out_image_id, &error);
+    if (result.code != MINI_OK) {
+        return fail(result.code, error.empty() ? "mini_import_capture_image failed" : error);
+    }
+    return success();
 }
 
 MiniResult mini_analyse_image_quality(MiniProjectHandle, MiniImageId, MiniImageQualityReport*) {
