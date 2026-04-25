@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -494,8 +495,105 @@ MiniResult mini_generate_processed_frame(MiniProjectHandle project, MiniImageId 
 #endif
 }
 
-MiniResult mini_build_preview_asset(MiniProjectHandle, MiniPreviewBuildOptions) {
-    return not_implemented("mini_build_preview_asset");
+MiniResult mini_build_preview_asset(MiniProjectHandle project, MiniPreviewBuildOptions options) {
+#if !defined(MINI_PAINTER_HAS_OPENCV)
+    (void) project;
+    (void) options;
+    return not_implemented("mini_build_preview_asset (OpenCV not available)");
+#else
+    if (project == nullptr) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "mini_build_preview_asset received invalid project handle");
+    }
+
+    const auto& capture_set = project->store->metadata().capture_set;
+    const int minimum_frames = options.minimum_frames > 0 ? options.minimum_frames : 1;
+    if (static_cast<int>(capture_set.size()) < minimum_frames) {
+        return fail(MINI_ERROR_INVALID_ARGUMENT, "insufficient capture images to build preview asset");
+    }
+
+    std::vector<const mini::ProjectMetadata::CaptureImage*> sorted_images;
+    sorted_images.reserve(capture_set.size());
+    for (const auto& image : capture_set) {
+        sorted_images.push_back(&image);
+    }
+    std::sort(sorted_images.begin(), sorted_images.end(), [](const auto* lhs, const auto* rhs) {
+        if (lhs->estimated_angle_degrees != rhs->estimated_angle_degrees) {
+            return lhs->estimated_angle_degrees < rhs->estimated_angle_degrees;
+        }
+        if (lhs->angle_index != rhs->angle_index) {
+            return lhs->angle_index < rhs->angle_index;
+        }
+        return lhs->image_id < rhs->image_id;
+    });
+
+    MiniFrameOptions frame_options{};
+    frame_options.normalize_canvas = 1;
+    for (const auto* image : sorted_images) {
+        MiniResult frame_result = mini_generate_processed_frame(project, image->image_id, frame_options);
+        if (frame_result.code != MINI_OK) {
+            return frame_result;
+        }
+    }
+
+    std::filesystem::path first_frame_path;
+    MiniResult first_frame_result = resolve_processed_frame_path(project, sorted_images.front()->image_id, &first_frame_path);
+    if (first_frame_result.code != MINI_OK) {
+        return first_frame_result;
+    }
+
+    cv::Mat first_frame = cv::imread(first_frame_path.string(), cv::IMREAD_UNCHANGED);
+    if (first_frame.empty()) {
+        return fail(MINI_ERROR_IMAGE_DECODE, "failed to load first processed frame for thumbnail generation");
+    }
+
+    cv::Mat thumbnail;
+    cv::resize(first_frame, thumbnail, cv::Size(256, 256), 0.0, 0.0, cv::INTER_AREA);
+
+    const std::filesystem::path project_dir(project->store->project_dir());
+    const std::filesystem::path thumbnail_path = project_dir / "preview" / "thumbnail.png";
+    if (!cv::imwrite(thumbnail_path.string(), thumbnail)) {
+        return fail(MINI_ERROR_IO, "failed to write preview thumbnail");
+    }
+
+    const std::filesystem::path preview_json_path = project_dir / "preview" / "preview.json";
+    std::ofstream out(preview_json_path);
+    if (!out) {
+        return fail(MINI_ERROR_IO, "failed to open preview.json for writing");
+    }
+
+    out << "{\n";
+    out << "  \"asset_id\": \"" << mini::generate_id() << "\",\n";
+    out << "  \"type\": \"multi_angle_impostor\",\n";
+    out << "  \"frame_count\": " << sorted_images.size() << ",\n";
+    out << "  \"frames\": [\n";
+    for (size_t i = 0; i < sorted_images.size(); ++i) {
+        const auto* image = sorted_images[i];
+        std::filesystem::path frame_path;
+        MiniResult frame_path_result = resolve_processed_frame_path(project, image->image_id, &frame_path);
+        if (frame_path_result.code != MINI_OK) {
+            return frame_path_result;
+        }
+
+        const std::filesystem::path rel_frame = std::filesystem::path("processed") / frame_path.filename();
+        out << "    {\n";
+        out << "      \"angle_degrees\": " << image->estimated_angle_degrees << ",\n";
+        out << "      \"path\": \"" << rel_frame.generic_string() << "\"\n";
+        out << "    }";
+        if (i + 1 != sorted_images.size()) {
+            out << ",";
+        }
+        out << "\n";
+    }
+    out << "  ],\n";
+    out << "  \"thumbnail\": \"preview/thumbnail.png\"\n";
+    out << "}\n";
+
+    if (!out) {
+        return fail(MINI_ERROR_IO, "failed while writing preview.json");
+    }
+
+    return success();
+#endif
 }
 
 MiniResult mini_create_paint_scheme(MiniProjectHandle, const char*, MiniPaintSchemeId*) {

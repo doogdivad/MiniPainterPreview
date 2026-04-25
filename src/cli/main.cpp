@@ -13,6 +13,7 @@ int usage() {
     std::cerr << "  mini_painter_cli set-mask --project <project_dir> --image-id <id> --mask <path>\n";
     std::cerr << "  mini_painter_cli cleanup-mask --project <project_dir> --image-id <id> [--remove-islands <px>] [--fill-holes <0|1>] [--feather <px>] [--dilate-erode <-n..n>]\n";
     std::cerr << "  mini_painter_cli generate-frame --project <project_dir> --image-id <id> [--normalize-canvas <0|1>]\n";
+    std::cerr << "  mini_painter_cli build-preview --project <project_dir> [--minimum-frames <count>]\n";
     return 1;
 }
 
@@ -281,6 +282,46 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "Processed frame generated.\n";
+        return 0;
+    }
+
+
+    if (command == "build-preview") {
+        std::string project_path;
+        MiniPreviewBuildOptions options{};
+        options.minimum_frames = 1;
+        for (int i = 2; i + 1 < argc; i += 2) {
+            std::string key = argv[i];
+            std::string value = argv[i + 1];
+            if (key == "--project") {
+                project_path = value;
+            } else if (key == "--minimum-frames") {
+                options.minimum_frames = std::stoi(value);
+            } else {
+                std::cerr << "Unknown option: " << key << "\n";
+                return usage();
+            }
+        }
+
+        if (project_path.empty()) {
+            return usage();
+        }
+
+        MiniProjectHandle project = nullptr;
+        MiniResult result = mini_open_project(project_path.c_str(), &project);
+        if (result.code != MINI_OK) {
+            std::cerr << "open failed: " << mini_get_last_error() << "\n";
+            return 2;
+        }
+
+        result = mini_build_preview_asset(project, options);
+        mini_close_project(project);
+        if (result.code != MINI_OK) {
+            std::cerr << "build-preview failed: " << mini_get_last_error() << "\n";
+            return 3;
+        }
+
+        std::cout << "Preview asset generated.\n";
         return 0;
     }
 

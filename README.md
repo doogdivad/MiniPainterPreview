@@ -101,3 +101,15 @@ The original C++ library scaffold remains in the repository root for iterative n
   - CLI support via:
     - `mini_painter_cli generate-frame --project <project_dir> --image-id <id> [--normalize-canvas <0|1>]`
   - tests now validate RGBA output generation and transparency behavior.
+
+
+- ✅ Milestone 6: preview asset generation is now implemented in `mini_painter_core`:
+  - `mini_build_preview_asset` now:
+    - validates minimum frame count
+    - sorts captures by estimated angle
+    - generates/refreshes processed frames for all captures
+    - writes `preview/preview.json` multi-angle manifest
+    - writes `preview/thumbnail.png` (256x256)
+  - CLI support via:
+    - `mini_painter_cli build-preview --project <project_dir> [--minimum-frames <count>]`
+  - tests now validate preview manifest and thumbnail generation.
