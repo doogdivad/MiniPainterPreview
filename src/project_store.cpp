@@ -1,6 +1,7 @@
 #include "project_store.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -349,6 +350,24 @@ MiniResult ProjectStore::import_capture_image(
 
     *out_image_id = next_image_id;
     return {MINI_OK};
+}
+
+MiniResult ProjectStore::set_image_quality_score(uint64_t image_id, double quality_score, std::string* out_error) {
+    if (image_id == 0 || out_error == nullptr) {
+        return {MINI_ERROR_INVALID_ARGUMENT};
+    }
+
+    auto it = std::find_if(metadata_.capture_set.begin(), metadata_.capture_set.end(), [image_id](const ProjectMetadata::CaptureImage& image) {
+        return image.image_id == image_id;
+    });
+    if (it == metadata_.capture_set.end()) {
+        *out_error = "image id not found in project capture set";
+        return {MINI_ERROR_INVALID_ARGUMENT};
+    }
+
+    it->quality_score = quality_score;
+    metadata_.updated_at = utc_now_iso8601();
+    return save(out_error);
 }
 
 std::string utc_now_iso8601() {

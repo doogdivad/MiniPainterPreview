@@ -65,6 +65,14 @@ typedef struct MiniImageQualityReport {
     uint32_t warning_flags;
 } MiniImageQualityReport;
 
+enum {
+    MINI_IMAGE_WARNING_TOO_BLURRY = 1u << 0u,
+    MINI_IMAGE_WARNING_TOO_DARK = 1u << 1u,
+    MINI_IMAGE_WARNING_TOO_BRIGHT = 1u << 2u,
+    MINI_IMAGE_WARNING_LIKELY_CROPPED = 1u << 3u,
+    MINI_IMAGE_WARNING_LOW_RESOLUTION = 1u << 4u
+};
+
 MiniResult mini_create_project(const char* root_dir, const char* display_name, MiniProjectHandle* out_project);
 MiniResult mini_open_project(const char* project_path, MiniProjectHandle* out_project);
 MiniResult mini_save_project(MiniProjectHandle project);
